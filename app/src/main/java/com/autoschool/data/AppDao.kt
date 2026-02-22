@@ -14,6 +14,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStudent(student: StudentEntity)
 
+    @Query("UPDATE students SET prepaidHours = :prepaidHours WHERE id = :studentId")
+    suspend fun updateStudentPrepaidHours(studentId: Long, prepaidHours: Double)
+
     @Query("DELETE FROM students WHERE id = :studentId")
     suspend fun deleteStudent(studentId: Long)
 
@@ -23,11 +26,29 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLesson(lesson: LessonEntity)
 
-    @Query("UPDATE lessons SET topics = :topics, rating = :rating WHERE id = :lessonId")
-    suspend fun updateLessonDetails(lessonId: Long, topics: String, rating: Int)
-
-    @Query("SELECT COALESCE(SUM(durationHours), 0) FROM lessons WHERE studentId = :studentId")
-    suspend fun totalHoursCompleted(studentId: Long): Double
+    @Query(
+        """
+        UPDATE lessons
+        SET date = :date,
+            startTime = :startTime,
+            endTime = :endTime,
+            durationHours = :durationHours,
+            topics = :topics,
+            rating = :rating,
+            studentId = :studentId
+        WHERE id = :lessonId
+        """
+    )
+    suspend fun updateLesson(
+        lessonId: Long,
+        date: String,
+        startTime: String,
+        endTime: String,
+        durationHours: Double,
+        topics: String,
+        rating: Int,
+        studentId: Long
+    )
 
     @Query("SELECT * FROM payments ORDER BY paymentDate DESC")
     fun observePayments(): Flow<List<PaymentEntity>>

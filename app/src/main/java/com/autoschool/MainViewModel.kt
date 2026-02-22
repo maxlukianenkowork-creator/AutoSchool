@@ -87,6 +87,12 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         }
     }
 
+    fun updateStudentPrepaidHours(studentId: Long, prepaidHours: Double) {
+        viewModelScope.launch {
+            dao.updateStudentPrepaidHours(studentId, prepaidHours.coerceAtLeast(0.0))
+        }
+    }
+
     fun addLesson(
         studentId: Long,
         date: String,
@@ -117,10 +123,38 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         }
     }
 
-    fun updateLesson(lessonId: Long, topics: String, rating: Int) {
+    fun updateLesson(
+        lessonId: Long,
+        date: String,
+        startTime: String,
+        durationHours: Double,
+        topics: String,
+        rating: Int,
+        studentId: Long
+    ) {
         viewModelScope.launch {
-            dao.updateLessonDetails(lessonId, topics, rating.coerceIn(1, 5))
+            val safeDuration = durationHours.coerceAtLeast(0.5)
+            val endTime = endTimeFrom(startTime, safeDuration)
+            dao.updateLesson(
+                lessonId = lessonId,
+                date = date,
+                startTime = startTime,
+                endTime = endTime,
+                durationHours = safeDuration,
+                topics = topics,
+                rating = rating.coerceIn(1, 5),
+                studentId = studentId
+            )
         }
+    }
+
+    private fun endTimeFrom(startTime: String, durationHours: Double): String {
+        val (h, m) = startTime.split(":").mapNotNull { it.toIntOrNull() }
+            .let { if (it.size == 2) it else listOf(8, 0) }
+        val totalMinutes = h * 60 + m + (durationHours * 60).toInt()
+        val endH = (totalMinutes / 60).coerceAtMost(23)
+        val endM = totalMinutes % 60
+        return String.format("%02d:%02d", endH, endM)
     }
 
     fun addPayment(studentId: Long, date: String, amount: Double, method: String) {

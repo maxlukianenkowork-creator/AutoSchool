@@ -1,22 +1,23 @@
 package com.autoschool
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -31,11 +32,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.autoschool.data.AppDatabase
+import com.autoschool.data.LessonEntity
+import com.autoschool.data.StudentEntity
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,6 +119,7 @@ private fun MainTabs(vm: MainViewModel) {
 
 @Composable
 private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val students by vm.students.collectAsStateWithLifecycle()
     val progress by vm.studentProgress.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("") }
@@ -130,12 +138,34 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(students, key = { it.id }) { student ->
                 val p = progress[student.id]
+                var prepaid by remember(student.id, student.prepaidHours) { mutableStateOf(student.prepaidHours.toString()) }
+
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(student.fullName)
                         Text("${student.phone} • Категория ${student.licenseCategory}")
                         Text("Пройдено уроков: ${p?.completedLessons ?: 0}")
                         Text("Осталось оплаченных часов: ${"%.1f".format(p?.remainingPaidHours ?: student.prepaidHours)}")
+
+                        OutlinedTextField(
+                            value = prepaid,
+                            onValueChange = { prepaid = it },
+                            label = { Text("Проплаченные часы") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                vm.updateStudentPrepaidHours(student.id, prepaid.toDoubleOrNull() ?: student.prepaidHours)
+                            }) {
+                                Text("Сохранить часы")
+                            }
+                            Button(onClick = {
+                                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${student.phone}"))
+                                context.startActivity(dialIntent)
+                            }) {
+                                Text("Позвонить")
+                            }
+                        }
                     }
                 }
             }
@@ -145,52 +175,36 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
-    val students by vm.students.collectAsStateWithLifecycle()
     val lessons by vm.lessons.collectAsStateWithLifecycle()
-    var duration by remember { mutableStateOf("1.0") }
-    var paid by remember { mutableStateOf(false) }
+    var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
+    val monthFormatter = DateTimeFormatter.ofPattern("MM.yyyy")
+    val hours = (8..20).toList()
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Занятия", style = MaterialTheme.typography.headlineSmall)
-        Text("Создание занятия для первого ученика в списке")
-        OutlinedTextField(duration, onValueChange = { duration = it }, label = { Text("Длительность (часы)") }, modifier = Modifier.fillMaxWidth())
-        Row {
-            Checkbox(checked = paid, onCheckedChange = { paid = it })
-            Text("Отметить как оплачено")
+        Text("Занятия: почасовой график на месяц", style = MaterialTheme.typography.headlineSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { selectedMonth = selectedMonth.minusMonths(1) }) { Text("<") }
+            Text("Месяц: ${selectedMonth.format(monthFormatter)}", modifier = Modifier.padding(top = 12.dp))
+            Button(onClick = { selectedMonth = selectedMonth.plusMonths(1) }) { Text(">") }
         }
-        Button(onClick = {
-            val first = students.firstOrNull() ?: return@Button
-            vm.addLesson(first.id, "2026-01-02", "10:00", "11:00", duration.toDoubleOrNull() ?: 1.0, "Город", "Манёвры", 4, "Хороший прогресс", paid)
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("Добавить занятие")
+
+        val lessonsInMonth = lessons.filter {
+            runCatching { YearMonth.from(LocalDate.parse(it.date)) }.getOrNull() == selectedMonth
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(lessons, key = { it.id }) { lesson ->
-                EditableLessonCard(lesson = lesson, onSave = { topics, rating ->
-                    vm.updateLesson(lesson.id, topics, rating)
-                })
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditableLessonCard(
-    lesson: com.autoschool.data.LessonEntity,
-    onSave: (topics: String, rating: Int) -> Unit
-) {
-    var topics by remember(lesson.id, lesson.topics) { mutableStateOf(lesson.topics) }
-    var rating by remember(lesson.id, lesson.rating) { mutableStateOf(lesson.rating.toString()) }
-
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("${lesson.date} • ${lesson.lessonType}")
-            Text("${lesson.startTime}-${lesson.endTime}, ${lesson.durationHours} ч")
-            OutlinedTextField(topics, { topics = it }, label = { Text("Тема урока") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(rating, { rating = it }, label = { Text("Оценка (1-5)") }, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { onSave(topics, rating.toIntOrNull() ?: lesson.rating) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Сохранить тему и оценку")
+            items((1..selectedMonth.lengthOfMonth()).toList()) { day ->
+                val date = selectedMonth.atDay(day)
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("${date.dayOfMonth}.${date.monthValue}.${date.year}")
+                        hours.forEach { hour ->
+                            val slot = String.format("%02d:00", hour)
+                            val slotCount = lessonsInMonth.count { it.date == date.toString() && it.startTime == slot }
+                            Text("$slot: ${if (slotCount == 0) "свободно" else "уроков: $slotCount"}")
+                        }
+                    }
+                }
             }
         }
     }
@@ -200,77 +214,150 @@ private fun EditableLessonCard(
 private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val students by vm.students.collectAsStateWithLifecycle()
     val lessons by vm.lessons.collectAsStateWithLifecycle()
-    var selectedHour by remember { mutableIntStateOf(8) }
-    var selectedStudentId by remember { mutableLongStateOf(0L) }
 
-    val today = "2026-01-04"
-    val hours = (8..20).toList()
-
-    if (selectedStudentId == 0L && students.isNotEmpty()) {
-        selectedStudentId = students.first().id
-    }
+    var date by remember { mutableStateOf(LocalDate.now().toString()) }
+    var openLessonDialog by remember { mutableStateOf(false) }
+    var editingLesson by remember { mutableStateOf<LessonEntity?>(null) }
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Календарь (расписание по часам)", style = MaterialTheme.typography.headlineSmall)
-        Text("Дата: $today")
+        Text("Календарь", style = MaterialTheme.typography.headlineSmall)
+        OutlinedTextField(
+            value = date,
+            onValueChange = { date = it },
+            label = { Text("Дата (YYYY-MM-DD)") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        Text("Выберите ученика для добавления в расписание")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            students.forEach { student ->
-                AssistChip(
-                    onClick = { selectedStudentId = student.id },
-                    label = { Text(student.fullName) }
-                )
-            }
+        Button(onClick = { openLessonDialog = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Открыть окно выбора времени")
         }
 
-        Text("Выберите час")
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            hours.forEach { hour ->
-                AssistChip(onClick = { selectedHour = hour }, label = { Text(String.format("%02d:00", hour)) })
-            }
-        }
+        val lessonsByDate = lessons.filter { it.date == date }.sortedBy { it.startTime }
+        Text("Занятия на дату: ${lessonsByDate.size}")
 
-        Button(onClick = {
-            val student = students.firstOrNull { it.id == selectedStudentId } ?: return@Button
-            val start = String.format("%02d:00", selectedHour)
-            val end = String.format("%02d:00", (selectedHour + 1).coerceAtMost(23))
-            vm.addLesson(
-                studentId = student.id,
-                date = today,
-                startTime = start,
-                endTime = end,
-                durationHours = 1.0,
-                type = "Город",
-                topics = "Календарное занятие",
-                rating = 5,
-                comment = "Добавлено из календаря",
-                isPaid = true
-            )
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("Добавить урок в выбранный час")
-        }
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(hours) { hour ->
-                val start = String.format("%02d:00", hour)
-                val lessonAtHour = lessons.firstOrNull { it.date == today && it.startTime == start }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(lessonsByDate, key = { it.id }) { lesson ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text("$start", style = MaterialTheme.typography.titleMedium)
-                        if (lessonAtHour == null) {
-                            Text("Свободно")
-                        } else {
-                            val studentName = students.firstOrNull { it.id == lessonAtHour.studentId }?.fullName ?: "Ученик"
-                            Text("Ученик: $studentName")
-                            Text("Тема: ${lessonAtHour.topics}")
-                            Text("Оценка: ${lessonAtHour.rating}")
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val studentName = students.firstOrNull { it.id == lesson.studentId }?.fullName ?: "Ученик"
+                        Text("${lesson.startTime}-${lesson.endTime} • $studentName")
+                        Text("Тема: ${lesson.topics}")
+                        Text("Оценка: ${lesson.rating}")
+                        Text("Длительность: ${lesson.durationHours} ч")
+                        Button(onClick = {
+                            editingLesson = lesson
+                            openLessonDialog = true
+                        }) {
+                            Text("Редактировать")
                         }
                     }
                 }
             }
         }
     }
+
+    if (openLessonDialog) {
+        LessonDialog(
+            date = date,
+            students = students,
+            editingLesson = editingLesson,
+            onDismiss = {
+                openLessonDialog = false
+                editingLesson = null
+            },
+            onSave = { selectedStudentId, selectedDate, startTime, duration, topic, rating ->
+                if (editingLesson == null) {
+                    val end = endTimeFrom(startTime, duration)
+                    vm.addLesson(
+                        studentId = selectedStudentId,
+                        date = selectedDate,
+                        startTime = startTime,
+                        endTime = end,
+                        durationHours = duration,
+                        type = "Город",
+                        topics = topic,
+                        rating = rating,
+                        comment = "Добавлено из календаря",
+                        isPaid = true
+                    )
+                } else {
+                    vm.updateLesson(
+                        lessonId = editingLesson!!.id,
+                        date = selectedDate,
+                        startTime = startTime,
+                        durationHours = duration,
+                        topics = topic,
+                        rating = rating,
+                        studentId = selectedStudentId
+                    )
+                }
+                openLessonDialog = false
+                editingLesson = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun LessonDialog(
+    date: String,
+    students: List<StudentEntity>,
+    editingLesson: LessonEntity?,
+    onDismiss: () -> Unit,
+    onSave: (studentId: Long, date: String, startTime: String, duration: Double, topic: String, rating: Int) -> Unit
+) {
+    var selectedStudentId by remember { mutableLongStateOf(editingLesson?.studentId ?: students.firstOrNull()?.id ?: 0L) }
+    var selectedDate by remember { mutableStateOf(editingLesson?.date ?: date) }
+    var startTime by remember { mutableStateOf(editingLesson?.startTime ?: "10:00") }
+    var duration by remember { mutableStateOf((editingLesson?.durationHours ?: 1.0).toString()) }
+    var topic by remember { mutableStateOf(editingLesson?.topics ?: "") }
+    var rating by remember { mutableStateOf((editingLesson?.rating ?: 5).toString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (editingLesson == null) "Добавить урок" else "Редактировать урок") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(selectedDate, { selectedDate = it }, label = { Text("Дата YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(startTime, { startTime = it }, label = { Text("Время начала HH:MM") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(duration, { duration = it }, label = { Text("Длительность (ч)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(topic, { topic = it }, label = { Text("Тема") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(rating, { rating = it }, label = { Text("Оценка (1-5)") }, modifier = Modifier.fillMaxWidth())
+
+                Text("Ученик")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    students.forEach { student ->
+                        AssistChip(onClick = { selectedStudentId = student.id }, label = { Text(student.fullName) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(
+                    selectedStudentId,
+                    selectedDate,
+                    startTime,
+                    duration.toDoubleOrNull() ?: 1.0,
+                    topic,
+                    (rating.toIntOrNull() ?: 5).coerceIn(1, 5)
+                )
+            }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
+}
+
+private fun endTimeFrom(startTime: String, durationHours: Double): String {
+    val parts = startTime.split(":")
+    val h = parts.getOrNull(0)?.toIntOrNull() ?: 8
+    val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val totalMinutes = h * 60 + m + (durationHours * 60).toInt()
+    val endH = (totalMinutes / 60).coerceAtMost(23)
+    val endM = totalMinutes % 60
+    return String.format("%02d:%02d", endH, endM)
 }
 
 @Composable
@@ -284,7 +371,7 @@ private fun PaymentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         OutlinedTextField(amount, { amount = it }, label = { Text("Сумма") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
             val first = students.firstOrNull() ?: return@Button
-            vm.addPayment(first.id, "2026-01-03", amount.toDoubleOrNull() ?: 0.0, "Наличные")
+            vm.addPayment(first.id, LocalDate.now().toString(), amount.toDoubleOrNull() ?: 0.0, "Наличные")
         }, modifier = Modifier.fillMaxWidth()) {
             Text("Добавить оплату")
         }
