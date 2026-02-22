@@ -1,5 +1,6 @@
 package com.autoschool
 
+import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -44,6 +45,7 @@ import com.autoschool.data.StudentEntity
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -131,7 +133,7 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         OutlinedTextField(name, { name = it }, label = { Text("ФИО") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(phone, { phone = it }, label = { Text("Телефон") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = {
-            vm.addStudent(name, phone, "2026-01-01", "B", 20.0, 1500.0, "")
+            vm.addStudent(name, phone, LocalDate.now().toString(), "B", 20.0, 250.0, "")
             name = ""
             phone = ""
         }, modifier = Modifier.fillMaxWidth()) { Text("Добавить ученика") }
@@ -157,6 +159,9 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                                 context.startActivity(dialIntent)
                             }) {
                                 Text("Позвонить")
+                            }
+                            Button(onClick = { vm.deleteStudent(student.id) }) {
+                                Text("Удалить ученика")
                             }
                         }
                     }
@@ -240,48 +245,39 @@ private fun EditStudentDialog(
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val lessons by vm.lessons.collectAsStateWithLifecycle()
     val students by vm.students.collectAsStateWithLifecycle()
-    var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
-    val monthFormatter = DateTimeFormatter.ofPattern("MM.yyyy")
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     val hours = (6..21).toList()
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Занятия: почасовой график на месяц", style = MaterialTheme.typography.headlineSmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { selectedMonth = selectedMonth.minusMonths(1) }) { Text("<") }
-            Text("Месяц: ${selectedMonth.format(monthFormatter)}", modifier = Modifier.padding(top = 12.dp))
-            Button(onClick = { selectedMonth = selectedMonth.plusMonths(1) }) { Text(">") }
-        }
+        Text("Занятия: почасовой график дня", style = MaterialTheme.typography.headlineSmall)
+        DateSelector(
+            date = selectedDate,
+            label = "Дата занятий",
+            onDateSelected = { selectedDate = it }
+        )
 
-        val lessonsInMonth = lessons.filter {
-            runCatching { YearMonth.from(LocalDate.parse(it.date)) }.getOrNull() == selectedMonth
-        }
+        val lessonsOfDay = lessons.filter { it.date == selectedDate.toString() }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items((1..selectedMonth.lengthOfMonth()).toList()) { day ->
-                val date = selectedMonth.atDay(day)
+            items(hours) { hour ->
+                val slot = String.format("%02d:00", hour)
+                val lessonAtSlot = lessonsOfDay.firstOrNull { lessonCoversHour(it.startTime, it.durationHours, hour) }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("${date.dayOfMonth}.${date.monthValue}.${date.year}")
-                        hours.forEach { hour ->
-                            val slot = String.format("%02d:00", hour)
-                            val lessonAtSlot = lessonsInMonth.firstOrNull {
-                                it.date == date.toString() && lessonCoversHour(it.startTime, it.durationHours, hour)
-                            }
-                            if (lessonAtSlot == null) {
-                                Text("$slot: свободно")
-                            } else {
-                                val student = students.firstOrNull { it.id == lessonAtSlot.studentId }
-                                val studentName = student?.fullName ?: "Ученик"
-                                val completedNow = completedHoursAtMoment(
-                                    studentId = lessonAtSlot.studentId,
-                                    lessons = lessons,
-                                    date = date,
-                                    hour = hour
-                                )
-                                val prepaid = student?.prepaidHours ?: 0.0
-                                val displayCompleted = if (completedNow < 1.0) 1.0 else completedNow
-                                Text("$slot: $studentName • ${"%.1f".format(displayCompleted)}/${"%.1f".format(prepaid)} ч")
-                            }
+                        if (lessonAtSlot == null) {
+                            Text("$slot: свободно")
+                        } else {
+                            val student = students.firstOrNull { it.id == lessonAtSlot.studentId }
+                            val studentName = student?.fullName ?: "Ученик"
+                            val completedNow = completedHoursAtMoment(
+                                studentId = lessonAtSlot.studentId,
+                                lessons = lessons,
+                                date = selectedDate,
+                                hour = hour
+                            )
+                            val prepaid = student?.prepaidHours ?: 0.0
+                            val displayCompleted = completedNow.coerceAtMost(prepaid).coerceAtLeast(1.0)
+                            Text("$slot: $studentName • ${"%.1f".format(displayCompleted)}/${"%.1f".format(prepaid)} ч")
                         }
                     }
                 }
@@ -301,11 +297,10 @@ private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Календарь", style = MaterialTheme.typography.headlineSmall)
-        OutlinedTextField(
-            value = date,
-            onValueChange = { date = it },
-            label = { Text("Дата (YYYY-MM-DD)") },
-            modifier = Modifier.fillMaxWidth()
+        DateSelector(
+            date = runCatching { LocalDate.parse(date) }.getOrElse { LocalDate.now() },
+            label = "Дата (календарь)",
+            onDateSelected = { date = it.toString() }
         )
 
         Button(onClick = { openLessonDialog = true }, modifier = Modifier.fillMaxWidth()) {
@@ -405,7 +400,11 @@ private fun LessonDialog(
         title = { Text(if (editingLesson == null) "Добавить урок" else "Редактировать урок") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(selectedDate, { selectedDate = it }, label = { Text("Дата YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
+                DateSelector(
+                    date = runCatching { LocalDate.parse(selectedDate) }.getOrElse { LocalDate.now() },
+                    label = "Дата урока",
+                    onDateSelected = { selectedDate = it.toString() }
+                )
                 Text("Время начала")
                 val hourOptions = (6..21).map { String.format("%02d:00", it) }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -417,7 +416,17 @@ private fun LessonDialog(
                         )
                     }
                 }
-                OutlinedTextField(duration, { duration = it }, label = { Text("Длительность (ч)") }, modifier = Modifier.fillMaxWidth())
+                Text("Длительность")
+                val durationOptions = listOf("1", "2", "3")
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(durationOptions) { option ->
+                        FilterChip(
+                            selected = duration == option,
+                            onClick = { duration = option },
+                            label = { Text("$option ч") }
+                        )
+                    }
+                }
                 OutlinedTextField(topic, { topic = it }, label = { Text("Тема") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(rating, { rating = it }, label = { Text("Оценка (1-5)") }, modifier = Modifier.fillMaxWidth())
 
@@ -448,6 +457,29 @@ private fun LessonDialog(
 }
 
 
+
+@Composable
+private fun DateSelector(
+    date: LocalDate,
+    label: String,
+    onDateSelected: (LocalDate) -> Unit
+) {
+    val context = LocalContext.current
+    val calendar = Calendar.getInstance().apply {
+        set(date.year, date.monthValue - 1, date.dayOfMonth)
+    }
+    Button(onClick = {
+        DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth -> onDateSelected(LocalDate.of(year, month + 1, dayOfMonth)) },
+            calendar.get(Calendar.YEAR),
+            calendar.get(Calendar.MONTH),
+            calendar.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }, modifier = Modifier.fillMaxWidth()) {
+        Text("$label: ${date}")
+    }
+}
 
 private fun completedHoursAtMoment(
     studentId: Long,
@@ -501,7 +533,7 @@ private fun endTimeFrom(startTime: String, durationHours: Double): String {
 private fun PaymentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val students by vm.students.collectAsStateWithLifecycle()
     val payments by vm.payments.collectAsStateWithLifecycle()
-    var amount by remember { mutableStateOf("1500") }
+    var amount by remember { mutableStateOf("250") }
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Финансы", style = MaterialTheme.typography.headlineSmall)
@@ -517,7 +549,7 @@ private fun PaymentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
             items(payments, key = { it.id }) { payment ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
-                        Text("${payment.paymentDate} • ${payment.amount} ₽")
+                        Text("${payment.paymentDate} • ${payment.amount} грн")
                         Text("Метод: ${payment.paymentMethod}")
                     }
                 }
@@ -536,7 +568,7 @@ private fun ReportScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                 Text("Всего учеников: ${dashboard.studentsCount}")
                 Text("Активных учеников: ${dashboard.activeStudents}")
                 Text("Проведено занятий: ${dashboard.lessonsCount}")
-                Text("Общий доход: ${dashboard.totalIncome} ₽")
+                Text("Общий доход: ${dashboard.totalIncome} грн")
             }
         }
         Text("Приложение работает оффлайн: данные хранятся в Room и доступны без интернета.")

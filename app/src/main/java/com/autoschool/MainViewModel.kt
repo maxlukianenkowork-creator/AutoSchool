@@ -87,6 +87,12 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         }
     }
 
+    fun deleteStudent(studentId: Long) {
+        viewModelScope.launch {
+            dao.deleteStudent(studentId)
+        }
+    }
+
     fun updateStudent(
         studentId: Long,
         fullName: String,
