@@ -14,8 +14,29 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStudent(student: StudentEntity)
 
-    @Query("UPDATE students SET prepaidHours = :prepaidHours WHERE id = :studentId")
-    suspend fun updateStudentPrepaidHours(studentId: Long, prepaidHours: Double)
+    @Query(
+        """
+        UPDATE students
+        SET fullName = :fullName,
+            phone = :phone,
+            startDate = :startDate,
+            licenseCategory = :licenseCategory,
+            prepaidHours = :prepaidHours,
+            hourlyRate = :hourlyRate,
+            notes = :notes
+        WHERE id = :studentId
+        """
+    )
+    suspend fun updateStudent(
+        studentId: Long,
+        fullName: String,
+        phone: String,
+        startDate: String,
+        licenseCategory: String,
+        prepaidHours: Double,
+        hourlyRate: Double,
+        notes: String
+    )
 
     @Query("DELETE FROM students WHERE id = :studentId")
     suspend fun deleteStudent(studentId: Long)

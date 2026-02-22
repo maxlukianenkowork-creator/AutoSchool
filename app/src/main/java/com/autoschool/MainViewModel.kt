@@ -87,9 +87,27 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         }
     }
 
-    fun updateStudentPrepaidHours(studentId: Long, prepaidHours: Double) {
+    fun updateStudent(
+        studentId: Long,
+        fullName: String,
+        phone: String,
+        startDate: String,
+        licenseCategory: String,
+        prepaidHours: Double,
+        hourlyRate: Double,
+        notes: String
+    ) {
         viewModelScope.launch {
-            dao.updateStudentPrepaidHours(studentId, prepaidHours.coerceAtLeast(0.0))
+            dao.updateStudent(
+                studentId = studentId,
+                fullName = fullName,
+                phone = phone,
+                startDate = startDate,
+                licenseCategory = licenseCategory,
+                prepaidHours = prepaidHours.coerceAtLeast(0.0),
+                hourlyRate = hourlyRate.coerceAtLeast(0.0),
+                notes = notes
+            )
         }
     }
 

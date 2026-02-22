@@ -138,7 +138,7 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(students, key = { it.id }) { student ->
                 val p = progress[student.id]
-                var prepaid by remember(student.id, student.prepaidHours) { mutableStateOf(student.prepaidHours.toString()) }
+                var openEditDialog by remember(student.id) { mutableStateOf(false) }
 
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -147,17 +147,9 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                         Text("Откатанные часы: ${"%.1f".format(p?.completedHours ?: 0.0)}")
                         Text("Проплаченные часы (всего): ${"%.1f".format(student.prepaidHours)}")
 
-                        OutlinedTextField(
-                            value = prepaid,
-                            onValueChange = { prepaid = it },
-                            label = { Text("Проплаченные часы") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = {
-                                vm.updateStudentPrepaidHours(student.id, prepaid.toDoubleOrNull() ?: student.prepaidHours)
-                            }) {
-                                Text("Сохранить часы")
+                            Button(onClick = { openEditDialog = true }) {
+                                Text("Редактировать")
                             }
                             Button(onClick = {
                                 val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${student.phone}"))
@@ -168,16 +160,85 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                         }
                     }
                 }
+
+                if (openEditDialog) {
+                    EditStudentDialog(
+                        student = student,
+                        onDismiss = { openEditDialog = false },
+                        onSave = { updated ->
+                            vm.updateStudent(
+                                studentId = updated.id,
+                                fullName = updated.fullName,
+                                phone = updated.phone,
+                                startDate = updated.startDate,
+                                licenseCategory = updated.licenseCategory,
+                                prepaidHours = updated.prepaidHours,
+                                hourlyRate = updated.hourlyRate,
+                                notes = updated.notes
+                            )
+                            openEditDialog = false
+                        }
+                    )
+                }
             }
         }
     }
+}
+
+
+@Composable
+private fun EditStudentDialog(
+    student: StudentEntity,
+    onDismiss: () -> Unit,
+    onSave: (StudentEntity) -> Unit
+) {
+    var fullName by remember(student.id) { mutableStateOf(student.fullName) }
+    var phone by remember(student.id) { mutableStateOf(student.phone) }
+    var startDate by remember(student.id) { mutableStateOf(student.startDate) }
+    var category by remember(student.id) { mutableStateOf(student.licenseCategory) }
+    var prepaid by remember(student.id) { mutableStateOf(student.prepaidHours.toString()) }
+    var rate by remember(student.id) { mutableStateOf(student.hourlyRate.toString()) }
+    var notes by remember(student.id) { mutableStateOf(student.notes) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Редактирование ученика") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(fullName, { fullName = it }, label = { Text("ФИО") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(phone, { phone = it }, label = { Text("Телефон") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(startDate, { startDate = it }, label = { Text("Дата начала") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(category, { category = it }, label = { Text("Категория") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(prepaid, { prepaid = it }, label = { Text("Проплаченные часы") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(rate, { rate = it }, label = { Text("Стоимость часа") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(notes, { notes = it }, label = { Text("Примечания") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onSave(
+                    student.copy(
+                        fullName = fullName,
+                        phone = phone,
+                        startDate = startDate,
+                        licenseCategory = category,
+                        prepaidHours = prepaid.toDoubleOrNull() ?: student.prepaidHours,
+                        hourlyRate = rate.toDoubleOrNull() ?: student.hourlyRate,
+                        notes = notes
+                    )
+                )
+            }) { Text("Сохранить") }
+        },
+        dismissButton = {
+            Button(onClick = onDismiss) { Text("Отмена") }
+        }
+    )
 }
 
 @Composable
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val lessons by vm.lessons.collectAsStateWithLifecycle()
     val students by vm.students.collectAsStateWithLifecycle()
-    val progress by vm.studentProgress.collectAsStateWithLifecycle()
     var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
     val monthFormatter = DateTimeFormatter.ofPattern("MM.yyyy")
     val hours = (6..21).toList()
@@ -210,10 +271,14 @@ private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                             } else {
                                 val student = students.firstOrNull { it.id == lessonAtSlot.studentId }
                                 val studentName = student?.fullName ?: "Ученик"
-                                val studentProgress = progress[lessonAtSlot.studentId]
-                                val completed = studentProgress?.completedHours ?: 0.0
+                                val completedNow = completedHoursAtMoment(
+                                    studentId = lessonAtSlot.studentId,
+                                    lessons = lessons,
+                                    date = date,
+                                    hour = hour
+                                )
                                 val prepaid = student?.prepaidHours ?: 0.0
-                                Text("$slot: $studentName • ${"%.1f".format(completed)}/${"%.1f".format(prepaid)} ч")
+                                Text("$slot: $studentName • ${"%.1f".format(completedNow)}/${"%.1f".format(prepaid)} ч")
                             }
                         }
                     }
@@ -363,6 +428,35 @@ private fun LessonDialog(
     )
 }
 
+
+
+private fun completedHoursAtMoment(
+    studentId: Long,
+    lessons: List<LessonEntity>,
+    date: LocalDate,
+    hour: Int
+): Double {
+    val momentMinutes = hour * 60
+    return lessons
+        .filter { it.studentId == studentId }
+        .sumOf { lesson ->
+            val lessonDate = runCatching { LocalDate.parse(lesson.date) }.getOrNull() ?: return@sumOf 0.0
+            if (lessonDate.isBefore(date)) return@sumOf lesson.durationHours
+            if (lessonDate.isAfter(date)) return@sumOf 0.0
+
+            val parts = lesson.startTime.split(":")
+            val startH = parts.getOrNull(0)?.toIntOrNull() ?: return@sumOf 0.0
+            val startM = parts.getOrNull(1)?.toIntOrNull() ?: 0
+            val startMinutes = startH * 60 + startM
+            val endMinutes = startMinutes + (lesson.durationHours * 60).toInt()
+
+            when {
+                endMinutes <= momentMinutes -> lesson.durationHours
+                startMinutes >= momentMinutes -> 0.0
+                else -> (momentMinutes - startMinutes).coerceAtLeast(0) / 60.0
+            }
+        }
+}
 
 private fun lessonCoversHour(startTime: String, durationHours: Double, hour: Int): Boolean {
     val parts = startTime.split(":")
