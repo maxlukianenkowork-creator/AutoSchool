@@ -17,11 +17,14 @@ interface AppDao {
     @Query("DELETE FROM students WHERE id = :studentId")
     suspend fun deleteStudent(studentId: Long)
 
-    @Query("SELECT * FROM lessons ORDER BY date DESC")
+    @Query("SELECT * FROM lessons ORDER BY date DESC, startTime DESC")
     fun observeLessons(): Flow<List<LessonEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLesson(lesson: LessonEntity)
+
+    @Query("UPDATE lessons SET topics = :topics, rating = :rating WHERE id = :lessonId")
+    suspend fun updateLessonDetails(lessonId: Long, topics: String, rating: Int)
 
     @Query("SELECT COALESCE(SUM(durationHours), 0) FROM lessons WHERE studentId = :studentId")
     suspend fun totalHoursCompleted(studentId: Long): Double

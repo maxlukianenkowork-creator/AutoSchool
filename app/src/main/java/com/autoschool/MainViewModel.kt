@@ -13,12 +13,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.max
 
 data class DashboardState(
     val studentsCount: Int = 0,
     val activeStudents: Int = 0,
     val lessonsCount: Int = 0,
     val totalIncome: Double = 0.0
+)
+
+data class StudentProgress(
+    val studentId: Long,
+    val completedLessons: Int,
+    val completedHours: Double,
+    val remainingPaidHours: Double
 )
 
 class MainViewModel(private val dao: AppDao) : ViewModel() {
@@ -37,6 +45,19 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DashboardState())
 
+    val studentProgress: StateFlow<Map<Long, StudentProgress>> = combine(students, lessons) { studentsList, lessonsList ->
+        studentsList.associate { student ->
+            val studentLessons = lessonsList.filter { it.studentId == student.id }
+            val completedHours = studentLessons.sumOf { it.durationHours }
+            student.id to StudentProgress(
+                studentId = student.id,
+                completedLessons = studentLessons.size,
+                completedHours = completedHours,
+                remainingPaidHours = max(0.0, student.prepaidHours - completedHours)
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     init {
         refreshIncome()
     }
@@ -50,6 +71,7 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         hourlyRate: Double,
         notes: String
     ) {
+        if (fullName.isBlank()) return
         viewModelScope.launch {
             dao.insertStudent(
                 StudentEntity(
@@ -92,6 +114,12 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
                     isPaid = isPaid
                 )
             )
+        }
+    }
+
+    fun updateLesson(lessonId: Long, topics: String, rating: Int) {
+        viewModelScope.launch {
+            dao.updateLessonDetails(lessonId, topics, rating.coerceIn(1, 5))
         }
     }
 

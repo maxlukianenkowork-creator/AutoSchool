@@ -6,16 +6,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -87,10 +89,12 @@ private fun LoginScreen(onSuccess: () -> Unit) {
 @Composable
 private fun MainTabs(vm: MainViewModel) {
     var tab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Ученики", "Занятия", "Календарь", "Финансы", "Отчёт")
+
     Scaffold(
         bottomBar = {
             NavigationBar {
-                listOf("Ученики", "Занятия", "Финансы", "Отчёт").forEachIndexed { index, label ->
+                tabs.forEachIndexed { index, label ->
                     NavigationBarItem(selected = tab == index, onClick = { tab = index }, icon = {}, label = { Text(label) })
                 }
             }
@@ -99,16 +103,17 @@ private fun MainTabs(vm: MainViewModel) {
         when (tab) {
             0 -> StudentsScreen(vm, Modifier.padding(innerPadding))
             1 -> LessonsScreen(vm, Modifier.padding(innerPadding))
-            2 -> PaymentsScreen(vm, Modifier.padding(innerPadding))
+            2 -> CalendarScreen(vm, Modifier.padding(innerPadding))
+            3 -> PaymentsScreen(vm, Modifier.padding(innerPadding))
             else -> ReportScreen(vm, Modifier.padding(innerPadding))
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val students by vm.students.collectAsStateWithLifecycle()
+    val progress by vm.studentProgress.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
 
@@ -124,11 +129,13 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(students, key = { it.id }) { student ->
+                val p = progress[student.id]
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Text(student.fullName)
                         Text("${student.phone} • Категория ${student.licenseCategory}")
-                        Text("Предоплачено: ${student.prepaidHours} ч")
+                        Text("Пройдено уроков: ${p?.completedLessons ?: 0}")
+                        Text("Осталось оплаченных часов: ${"%.1f".format(p?.remainingPaidHours ?: student.prepaidHours)}")
                     }
                 }
             }
@@ -140,7 +147,7 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val students by vm.students.collectAsStateWithLifecycle()
     val lessons by vm.lessons.collectAsStateWithLifecycle()
-    var duration by remember { mutableStateOf("1.5") }
+    var duration by remember { mutableStateOf("1.0") }
     var paid by remember { mutableStateOf(false) }
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,18 +160,112 @@ private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         }
         Button(onClick = {
             val first = students.firstOrNull() ?: return@Button
-            vm.addLesson(first.id, "2026-01-02", "10:00", "11:30", duration.toDoubleOrNull() ?: 1.0, "Город", "Манёвры", 4, "Хороший прогресс", paid)
+            vm.addLesson(first.id, "2026-01-02", "10:00", "11:00", duration.toDoubleOrNull() ?: 1.0, "Город", "Манёвры", 4, "Хороший прогресс", paid)
         }, modifier = Modifier.fillMaxWidth()) {
             Text("Добавить занятие")
         }
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(lessons, key = { it.id }) { lesson ->
+                EditableLessonCard(lesson = lesson, onSave = { topics, rating ->
+                    vm.updateLesson(lesson.id, topics, rating)
+                })
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditableLessonCard(
+    lesson: com.autoschool.data.LessonEntity,
+    onSave: (topics: String, rating: Int) -> Unit
+) {
+    var topics by remember(lesson.id, lesson.topics) { mutableStateOf(lesson.topics) }
+    var rating by remember(lesson.id, lesson.rating) { mutableStateOf(lesson.rating.toString()) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("${lesson.date} • ${lesson.lessonType}")
+            Text("${lesson.startTime}-${lesson.endTime}, ${lesson.durationHours} ч")
+            OutlinedTextField(topics, { topics = it }, label = { Text("Тема урока") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(rating, { rating = it }, label = { Text("Оценка (1-5)") }, modifier = Modifier.fillMaxWidth())
+            Button(onClick = { onSave(topics, rating.toIntOrNull() ?: lesson.rating) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Сохранить тему и оценку")
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
+    val students by vm.students.collectAsStateWithLifecycle()
+    val lessons by vm.lessons.collectAsStateWithLifecycle()
+    var selectedHour by remember { mutableIntStateOf(8) }
+    var selectedStudentId by remember { mutableLongStateOf(0L) }
+
+    val today = "2026-01-04"
+    val hours = (8..20).toList()
+
+    if (selectedStudentId == 0L && students.isNotEmpty()) {
+        selectedStudentId = students.first().id
+    }
+
+    Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Календарь (расписание по часам)", style = MaterialTheme.typography.headlineSmall)
+        Text("Дата: $today")
+
+        Text("Выберите ученика для добавления в расписание")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            students.forEach { student ->
+                AssistChip(
+                    onClick = { selectedStudentId = student.id },
+                    label = { Text(student.fullName) }
+                )
+            }
+        }
+
+        Text("Выберите час")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            hours.forEach { hour ->
+                AssistChip(onClick = { selectedHour = hour }, label = { Text(String.format("%02d:00", hour)) })
+            }
+        }
+
+        Button(onClick = {
+            val student = students.firstOrNull { it.id == selectedStudentId } ?: return@Button
+            val start = String.format("%02d:00", selectedHour)
+            val end = String.format("%02d:00", (selectedHour + 1).coerceAtMost(23))
+            vm.addLesson(
+                studentId = student.id,
+                date = today,
+                startTime = start,
+                endTime = end,
+                durationHours = 1.0,
+                type = "Город",
+                topics = "Календарное занятие",
+                rating = 5,
+                comment = "Добавлено из календаря",
+                isPaid = true
+            )
+        }, modifier = Modifier.fillMaxWidth()) {
+            Text("Добавить урок в выбранный час")
+        }
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(hours) { hour ->
+                val start = String.format("%02d:00", hour)
+                val lessonAtHour = lessons.firstOrNull { it.date == today && it.startTime == start }
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("${lesson.date} • ${lesson.lessonType}")
-                        Text("${lesson.startTime}-${lesson.endTime}, ${lesson.durationHours} ч")
-                        Text("Тема: ${lesson.topics}, Оценка: ${lesson.rating}")
+                    Column(Modifier.padding(10.dp)) {
+                        Text("$start", style = MaterialTheme.typography.titleMedium)
+                        if (lessonAtHour == null) {
+                            Text("Свободно")
+                        } else {
+                            val studentName = students.firstOrNull { it.id == lessonAtHour.studentId }?.fullName ?: "Ученик"
+                            Text("Ученик: $studentName")
+                            Text("Тема: ${lessonAtHour.topics}")
+                            Text("Оценка: ${lessonAtHour.rating}")
+                        }
                     }
                 }
             }
