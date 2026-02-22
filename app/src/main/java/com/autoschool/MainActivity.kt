@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -176,9 +176,10 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val lessons by vm.lessons.collectAsStateWithLifecycle()
+    val students by vm.students.collectAsStateWithLifecycle()
     var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
     val monthFormatter = DateTimeFormatter.ofPattern("MM.yyyy")
-    val hours = (8..20).toList()
+    val hours = (6..21).toList()
 
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Занятия: почасовой график на месяц", style = MaterialTheme.typography.headlineSmall)
@@ -200,8 +201,22 @@ private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                         Text("${date.dayOfMonth}.${date.monthValue}.${date.year}")
                         hours.forEach { hour ->
                             val slot = String.format("%02d:00", hour)
-                            val slotCount = lessonsInMonth.count { it.date == date.toString() && it.startTime == slot }
-                            Text("$slot: ${if (slotCount == 0) "свободно" else "уроков: $slotCount"}")
+                            val lessonAtSlot = lessonsInMonth.firstOrNull { it.date == date.toString() && it.startTime == slot }
+                            if (lessonAtSlot == null) {
+                                Text("$slot: свободно")
+                            } else {
+                                val student = students.firstOrNull { it.id == lessonAtSlot.studentId }
+                                val studentName = student?.fullName ?: "Ученик"
+                                val orderedLessons = lessons
+                                    .filter { it.studentId == lessonAtSlot.studentId }
+                                    .sortedWith(compareBy({ it.date }, { it.startTime }))
+                                val lessonNumber = orderedLessons.indexOfFirst { it.id == lessonAtSlot.id }
+                                    .let { if (it >= 0) it + 1 else 1 }
+                                val prepaidLessons = (student?.prepaidHours ?: lessonNumber.toDouble())
+                                    .toInt()
+                                    .coerceAtLeast(1)
+                                Text("$slot: $studentName • $lessonNumber/$prepaidLessons")
+                            }
                         }
                     }
                 }
@@ -327,7 +342,7 @@ private fun LessonDialog(
                 Text("Ученик")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     students.forEach { student ->
-                        AssistChip(onClick = { selectedStudentId = student.id }, label = { Text(student.fullName) })
+                        FilterChip(selected = selectedStudentId == student.id, onClick = { selectedStudentId = student.id }, label = { Text(student.fullName) })
                     }
                 }
             }
