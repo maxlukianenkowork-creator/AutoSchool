@@ -144,8 +144,8 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(student.fullName)
                         Text("${student.phone} • Категория ${student.licenseCategory}")
-                        Text("Пройдено уроков: ${p?.completedLessons ?: 0}")
-                        Text("Осталось оплаченных часов: ${"%.1f".format(p?.remainingPaidHours ?: student.prepaidHours)}")
+                        Text("Откатанные часы: ${"%.1f".format(p?.completedHours ?: 0.0)}")
+                        Text("Проплаченные часы (всего): ${"%.1f".format(student.prepaidHours)}")
 
                         OutlinedTextField(
                             value = prepaid,
@@ -177,6 +177,7 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     val lessons by vm.lessons.collectAsStateWithLifecycle()
     val students by vm.students.collectAsStateWithLifecycle()
+    val progress by vm.studentProgress.collectAsStateWithLifecycle()
     var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
     val monthFormatter = DateTimeFormatter.ofPattern("MM.yyyy")
     val hours = (6..21).toList()
@@ -201,21 +202,18 @@ private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                         Text("${date.dayOfMonth}.${date.monthValue}.${date.year}")
                         hours.forEach { hour ->
                             val slot = String.format("%02d:00", hour)
-                            val lessonAtSlot = lessonsInMonth.firstOrNull { it.date == date.toString() && it.startTime == slot }
+                            val lessonAtSlot = lessonsInMonth.firstOrNull {
+                                it.date == date.toString() && lessonCoversHour(it.startTime, it.durationHours, hour)
+                            }
                             if (lessonAtSlot == null) {
                                 Text("$slot: свободно")
                             } else {
                                 val student = students.firstOrNull { it.id == lessonAtSlot.studentId }
                                 val studentName = student?.fullName ?: "Ученик"
-                                val orderedLessons = lessons
-                                    .filter { it.studentId == lessonAtSlot.studentId }
-                                    .sortedWith(compareBy({ it.date }, { it.startTime }))
-                                val lessonNumber = orderedLessons.indexOfFirst { it.id == lessonAtSlot.id }
-                                    .let { if (it >= 0) it + 1 else 1 }
-                                val prepaidLessons = (student?.prepaidHours ?: lessonNumber.toDouble())
-                                    .toInt()
-                                    .coerceAtLeast(1)
-                                Text("$slot: $studentName • $lessonNumber/$prepaidLessons")
+                                val studentProgress = progress[lessonAtSlot.studentId]
+                                val completed = studentProgress?.completedHours ?: 0.0
+                                val prepaid = student?.prepaidHours ?: 0.0
+                                Text("$slot: $studentName • ${"%.1f".format(completed)}/${"%.1f".format(prepaid)} ч")
                             }
                         }
                     }
@@ -363,6 +361,17 @@ private fun LessonDialog(
             Button(onClick = onDismiss) { Text("Отмена") }
         }
     )
+}
+
+
+private fun lessonCoversHour(startTime: String, durationHours: Double, hour: Int): Boolean {
+    val parts = startTime.split(":")
+    val startH = parts.getOrNull(0)?.toIntOrNull() ?: return false
+    val startM = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val startMinutes = startH * 60 + startM
+    val endMinutes = startMinutes + (durationHours * 60).toInt()
+    val slotStart = hour * 60
+    return slotStart >= startMinutes && slotStart < endMinutes
 }
 
 private fun endTimeFrom(startTime: String, durationHours: Double): String {
