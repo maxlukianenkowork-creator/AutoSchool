@@ -124,13 +124,15 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         isPaid: Boolean
     ) {
         viewModelScope.launch {
+            val safeDuration = durationHours.coerceAtLeast(1.0)
+            if (hasLessonConflict(date, startTime, safeDuration, excludeLessonId = null)) return@launch
             dao.insertLesson(
                 LessonEntity(
                     studentId = studentId,
                     date = date,
                     startTime = startTime,
-                    endTime = endTime,
-                    durationHours = durationHours,
+                    endTime = endTimeFrom(startTime, safeDuration),
+                    durationHours = safeDuration,
                     lessonType = type,
                     topics = topics,
                     rating = rating,
@@ -138,6 +140,13 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
                     isPaid = isPaid
                 )
             )
+        }
+    }
+
+
+    fun deleteLesson(lessonId: Long) {
+        viewModelScope.launch {
+            dao.deleteLesson(lessonId)
         }
     }
 
@@ -151,7 +160,8 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         studentId: Long
     ) {
         viewModelScope.launch {
-            val safeDuration = durationHours.coerceAtLeast(0.5)
+            val safeDuration = durationHours.coerceAtLeast(1.0)
+            if (hasLessonConflict(date, startTime, safeDuration, excludeLessonId = lessonId)) return@launch
             val endTime = endTimeFrom(startTime, safeDuration)
             dao.updateLesson(
                 lessonId = lessonId,
@@ -164,6 +174,31 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
                 studentId = studentId
             )
         }
+    }
+
+
+    private fun hasLessonConflict(
+        date: String,
+        startTime: String,
+        durationHours: Double,
+        excludeLessonId: Long?
+    ): Boolean {
+        val newStart = toMinutes(startTime)
+        val newEnd = newStart + (durationHours * 60).toInt()
+        return lessons.value.any { lesson ->
+            lesson.date == date && (excludeLessonId == null || lesson.id != excludeLessonId) && run {
+                val existingStart = toMinutes(lesson.startTime)
+                val existingEnd = existingStart + (lesson.durationHours * 60).toInt()
+                newStart < existingEnd && existingStart < newEnd
+            }
+        }
+    }
+
+    private fun toMinutes(time: String): Int {
+        val parts = time.split(":")
+        val h = parts.getOrNull(0)?.toIntOrNull() ?: 0
+        val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+        return h * 60 + m
     }
 
     private fun endTimeFrom(startTime: String, durationHours: Double): String {

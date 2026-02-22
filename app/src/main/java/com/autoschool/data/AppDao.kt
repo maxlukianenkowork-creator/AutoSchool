@@ -47,6 +47,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLesson(lesson: LessonEntity)
 
+    @Query("DELETE FROM lessons WHERE id = :lessonId")
+    suspend fun deleteLesson(lessonId: Long)
+
     @Query(
         """
         UPDATE lessons

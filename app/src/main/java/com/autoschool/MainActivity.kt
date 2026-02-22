@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
@@ -278,7 +279,8 @@ private fun LessonsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                                     hour = hour
                                 )
                                 val prepaid = student?.prepaidHours ?: 0.0
-                                Text("$slot: $studentName • ${"%.1f".format(completedNow)}/${"%.1f".format(prepaid)} ч")
+                                val displayCompleted = if (completedNow < 1.0) 1.0 else completedNow
+                                Text("$slot: $studentName • ${"%.1f".format(displayCompleted)}/${"%.1f".format(prepaid)} ч")
                             }
                         }
                     }
@@ -322,11 +324,18 @@ private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                         Text("Тема: ${lesson.topics}")
                         Text("Оценка: ${lesson.rating}")
                         Text("Длительность: ${lesson.durationHours} ч")
-                        Button(onClick = {
-                            editingLesson = lesson
-                            openLessonDialog = true
-                        }) {
-                            Text("Редактировать")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                editingLesson = lesson
+                                openLessonDialog = true
+                            }) {
+                                Text("Редактировать")
+                            }
+                            Button(onClick = {
+                                vm.deleteLesson(lesson.id)
+                            }) {
+                                Text("Удалить")
+                            }
                         }
                     }
                 }
@@ -397,7 +406,17 @@ private fun LessonDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(selectedDate, { selectedDate = it }, label = { Text("Дата YYYY-MM-DD") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(startTime, { startTime = it }, label = { Text("Время начала HH:MM") }, modifier = Modifier.fillMaxWidth())
+                Text("Время начала")
+                val hourOptions = (6..21).map { String.format("%02d:00", it) }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(hourOptions) { hour ->
+                        FilterChip(
+                            selected = startTime == hour,
+                            onClick = { startTime = hour },
+                            label = { Text(hour) }
+                        )
+                    }
+                }
                 OutlinedTextField(duration, { duration = it }, label = { Text("Длительность (ч)") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(topic, { topic = it }, label = { Text("Тема") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(rating, { rating = it }, label = { Text("Оценка (1-5)") }, modifier = Modifier.fillMaxWidth())
