@@ -503,8 +503,11 @@ private fun completedHoursAtMoment(
 
             when {
                 endMinutes <= momentMinutes -> lesson.durationHours
-                startMinutes >= momentMinutes -> 0.0
-                else -> (momentMinutes - startMinutes).coerceAtLeast(0) / 60.0
+                startMinutes > momentMinutes -> 0.0
+                else -> {
+                    val passedWholeHours = ((momentMinutes - startMinutes).coerceAtLeast(0) / 60)
+                    (passedWholeHours + 1).toDouble().coerceAtMost(lesson.durationHours)
+                }
             }
         }
 }
