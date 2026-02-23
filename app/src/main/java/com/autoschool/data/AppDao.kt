@@ -80,6 +80,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPayment(payment: PaymentEntity)
 
+    @Query("DELETE FROM payments WHERE id = :paymentId")
+    suspend fun deletePayment(paymentId: Long)
+
     @Query("SELECT COALESCE(SUM(amount), 0) FROM payments")
     suspend fun totalIncome(): Double
 }

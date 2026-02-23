@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -46,6 +47,8 @@ import com.autoschool.data.StudentEntity
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import java.io.FileOutputStream
 import java.util.Calendar
 
 class MainActivity : ComponentActivity() {
@@ -573,9 +576,12 @@ private fun PaymentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(payments, key = { it.id }) { payment ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("${payment.paymentDate} • ${payment.amount} грн")
                         Text("Метод: ${payment.paymentMethod}")
+                        Button(onClick = { vm.deletePayment(payment.id) }) {
+                            Text("Удалить оплату")
+                        }
                     }
                 }
             }
@@ -585,17 +591,96 @@ private fun PaymentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ReportScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val dashboard by vm.dashboard.collectAsStateWithLifecycle()
+    val lessons by vm.lessons.collectAsStateWithLifecycle()
+    val students by vm.students.collectAsStateWithLifecycle()
+    var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
+
+    val monthLessons = lessons.filter {
+        runCatching { YearMonth.from(LocalDate.parse(it.date)) }.getOrNull() == selectedMonth
+    }
+    val monthlyHours = monthLessons.sumOf { it.durationHours }
+
     Column(modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Базовый отчёт (MVP)", style = MaterialTheme.typography.headlineSmall)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { selectedMonth = selectedMonth.minusMonths(1) }) { Text("<") }
+            Text("Месяц отчёта: ${selectedMonth}", modifier = Modifier.padding(top = 12.dp))
+            Button(onClick = { selectedMonth = selectedMonth.plusMonths(1) }) { Text(">") }
+        }
+
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Всего учеников: ${dashboard.studentsCount}")
                 Text("Активных учеников: ${dashboard.activeStudents}")
                 Text("Проведено занятий: ${dashboard.lessonsCount}")
+                Text("Откатано за месяц: ${"%.1f".format(monthlyHours)} ч")
                 Text("Общий доход: ${dashboard.totalIncome} грн")
             }
         }
+
+        Button(onClick = {
+            val file = exportMonthlyReportXlsx(
+                context = context,
+                month = selectedMonth,
+                students = students,
+                lessons = monthLessons
+            )
+            Toast.makeText(context, "Отчёт сохранён: ${file.name}", Toast.LENGTH_LONG).show()
+        }, modifier = Modifier.fillMaxWidth()) {
+            Text("Сформировать XLSX за месяц")
+        }
+
         Text("Приложение работает оффлайн: данные хранятся в Room и доступны без интернета.")
     }
+}
+
+
+
+private fun exportMonthlyReportXlsx(
+    context: android.content.Context,
+    month: YearMonth,
+    students: List<StudentEntity>,
+    lessons: List<LessonEntity>
+): java.io.File {
+    val workbook = XSSFWorkbook()
+    val sheet = workbook.createSheet("Отчет ${month}")
+
+    val days = (1..month.lengthOfMonth()).toList()
+
+    val header = sheet.createRow(0)
+    header.createCell(0).setCellValue("Ученик")
+    days.forEachIndexed { index, day ->
+        header.createCell(index + 1).setCellValue(day.toString())
+    }
+
+    students.forEachIndexed { rowIndex, student ->
+        val row = sheet.createRow(rowIndex + 1)
+        row.createCell(0).setCellValue(student.fullName)
+
+        days.forEachIndexed { index, day ->
+            val date = month.atDay(day).toString()
+            val dayLessons = lessons
+                .filter { it.studentId == student.id && it.date == date }
+                .sortedBy { it.startTime }
+                .joinToString("; ") { "${it.startTime}-${it.endTime}" }
+            row.createCell(index + 1).setCellValue(dayLessons)
+        }
+    }
+
+    val totalHours = lessons.sumOf { it.durationHours }
+    val totalRow = sheet.createRow(students.size + 2)
+    totalRow.createCell(0).setCellValue("Итого часов инструктором")
+    totalRow.createCell(1).setCellValue(totalHours)
+
+    for (i in 0..days.size) {
+        sheet.autoSizeColumn(i)
+    }
+
+    val file = java.io.File(context.getExternalFilesDir(null), "report-${month}.xlsx")
+    FileOutputStream(file).use { out -> workbook.write(out) }
+    workbook.close()
+    return file
 }

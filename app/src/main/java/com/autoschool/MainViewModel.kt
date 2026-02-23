@@ -216,6 +216,13 @@ class MainViewModel(private val dao: AppDao) : ViewModel() {
         return String.format("%02d:%02d", endH, endM)
     }
 
+    fun deletePayment(paymentId: Long) {
+        viewModelScope.launch {
+            dao.deletePayment(paymentId)
+            refreshIncome()
+        }
+    }
+
     fun addPayment(studentId: Long, date: String, amount: Double, method: String) {
         viewModelScope.launch {
             dao.insertPayment(PaymentEntity(studentId = studentId, paymentDate = date, amount = amount, paymentMethod = method))
