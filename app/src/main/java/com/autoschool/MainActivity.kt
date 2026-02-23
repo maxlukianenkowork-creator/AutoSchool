@@ -161,9 +161,6 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                             }) {
                                 Text("Позвонить")
                             }
-                            Button(onClick = { vm.deleteStudent(student.id) }) {
-                                Text("Удалить ученика")
-                            }
                         }
                     }
                 }
@@ -184,6 +181,10 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
                                 notes = updated.notes
                             )
                             openEditDialog = false
+                        },
+                        onDelete = { studentId ->
+                            vm.deleteStudent(studentId)
+                            openEditDialog = false
                         }
                     )
                 }
@@ -197,7 +198,8 @@ private fun StudentsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 private fun EditStudentDialog(
     student: StudentEntity,
     onDismiss: () -> Unit,
-    onSave: (StudentEntity) -> Unit
+    onSave: (StudentEntity) -> Unit,
+    onDelete: (Long) -> Unit
 ) {
     var fullName by remember(student.id) { mutableStateOf(student.fullName) }
     var phone by remember(student.id) { mutableStateOf(student.phone) }
@@ -237,7 +239,10 @@ private fun EditStudentDialog(
             }) { Text("Сохранить") }
         },
         dismissButton = {
-            Button(onClick = onDismiss) { Text("Отмена") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onDelete(student.id) }) { Text("Удалить ученика") }
+                Button(onClick = onDismiss) { Text("Отмена") }
+            }
         }
     )
 }
