@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -342,6 +343,7 @@ private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         LessonDialog(
             date = date,
             students = students,
+            lessons = lessons,
             editingLesson = editingLesson,
             onDismiss = {
                 openLessonDialog = false
@@ -384,6 +386,7 @@ private fun CalendarScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 private fun LessonDialog(
     date: String,
     students: List<StudentEntity>,
+    lessons: List<LessonEntity>,
     editingLesson: LessonEntity?,
     onDismiss: () -> Unit,
     onSave: (studentId: Long, date: String, startTime: String, duration: Double, topic: String, rating: Int) -> Unit
@@ -407,12 +410,26 @@ private fun LessonDialog(
                 )
                 Text("Время начала")
                 val hourOptions = (6..21).map { String.format("%02d:00", it) }
+                val selectedDateValue = runCatching { LocalDate.parse(selectedDate) }.getOrElse { LocalDate.now() }
+                val occupiedHours = lessons
+                    .filter { it.date == selectedDateValue.toString() && (editingLesson == null || it.id != editingLesson.id) }
+                    .flatMap { lesson ->
+                        (6..21).filter { hour -> lessonCoversHour(lesson.startTime, lesson.durationHours, hour) }
+                    }
+                    .toSet()
+
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(hourOptions) { hour ->
+                        val hourInt = hour.substringBefore(":").toIntOrNull() ?: 0
+                        val occupied = hourInt in occupiedHours
                         FilterChip(
                             selected = startTime == hour,
                             onClick = { startTime = hour },
-                            label = { Text(hour) }
+                            label = { Text(if (occupied) "$hour • занято" else hour) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = if (occupied) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                labelColor = if (occupied) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         )
                     }
                 }
